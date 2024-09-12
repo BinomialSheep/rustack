@@ -64,7 +64,7 @@ impl std::fmt::Debug for NativeOp {
 
 struct Vm {
     stack: Vec<Value>,
-    vars: HashMap<String, Value>,
+    vars: Vec<HashMap<String, Value>>,
     blocks: Vec<Vec<Value>>,
 }
 
@@ -87,12 +87,18 @@ impl Vm {
 
         Self {
             stack: vec![],
-            vars: functions
+            vars: vec![functions
                 .into_iter()
                 .map(|(name, fun)| (name.to_owned(), Value::Native(NativeOp(fun))))
-                .collect(),
+                .collect()],
             blocks: vec![],
         }
+    }
+    fn find_var(&self, name: &str) -> Option<Value> {
+        self.vars
+            .iter()
+            .rev()
+            .find_map(|vars| vars.get(name).map(|var| var.to_owned()))
     }
 }
 
@@ -101,7 +107,7 @@ fn main() {
         .nth(1)
         .and_then(|f| std::fs::File::open(f).ok())
     {
-        // コマンドライン引数がある場合、そのファイルを入力とする
+        // コマンドライン引数がある場合、そのファイルを入力とする（cargo run -- hoge.txtのように渡す）
         parse_batch(BufReader::new(f));
     } else {
         // ない場合、インタラクティブモード
@@ -161,15 +167,15 @@ fn eval(code: Value, vm: &mut Vm) {
 
     if let Value::Op(ref op) = code {
         let val = vm
-            .vars
-            .get(op)
-            .expect(&format!("{op:?} is not a defined operation"))
-            .clone();
+            .find_var(op)
+            .expect(&format!("{op:?} is not a defined operation"));
         match val {
             Value::Block(block) => {
+                vm.vars.push(HashMap::new());
                 for code in block {
                     eval(code, vm);
                 }
+                vm.vars.pop();
             }
             Value::Native(op) => op.0(vm),
             _ => vm.stack.push(val),
@@ -223,7 +229,7 @@ fn op_def(vm: &mut Vm) {
     let value = vm.stack.pop().unwrap();
     let sym = vm.stack.pop().unwrap().as_sym().to_string();
 
-    vm.vars.insert(sym, value);
+    vm.vars.last_mut().unwrap().insert(sym, value);
 }
 
 fn puts(vm: &mut Vm) {
@@ -348,6 +354,61 @@ mod test {
                 "#
             ),
             vec![Num(5)]
+        );
+    }
+
+    #[test]
+    fn test_factorial() {
+        assert_eq!(
+            parse(
+                r#"
+                /factorial { 1 factorial_int } def
+                /factorial_int {
+                /acc exch def
+                /n exch def
+                { n 2 < }
+                { acc }
+                {
+                    n 1 -
+                    acc n *
+                    factorial_int
+                }
+                if
+                } def
+                 10 factorial
+                "#
+            ),
+            vec![Num(3628800)]
+        );
+    }
+
+    #[test]
+    fn test_fib() {
+        assert_eq!(
+            parse(
+                r#"
+                /fib {
+                    /n exch def
+                    { n 1 < }
+                    { 0 }
+                    {
+                        { n 2 < }
+                        { 1 }
+                        {
+                            n 1 -
+                            fib
+                            n 2 -
+                            fib
+                            +
+                        }
+                        if
+                    }
+                    if
+                } def
+                10 fib      
+                "#
+            ),
+            vec![Num(55)]
         );
     }
 }
