@@ -1,0 +1,5 @@
+/square { dup * } def
+/vec2sqlen { square exch square exch + } def
+1 2 vec2sqlen
+
+puts
